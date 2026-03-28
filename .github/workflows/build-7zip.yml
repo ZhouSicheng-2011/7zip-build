@@ -1,0 +1,150 @@
+name: Build 7-Zip
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: '7-Zip 版本号（例如 26.00）'
+        required: true
+        default: '26.00'
+
+jobs:
+  build:
+    name: Build on ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    container: ${{ matrix.os == 'ubuntu-latest' && 'quay.io/pypa/manylinux_2_28_x86_64' }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+
+    steps:
+      # 安装通用工具（非容器环境）
+      - name: Install 7z (Linux/macOS)
+        if: runner.os != 'Windows' && matrix.os != 'ubuntu-latest'
+        run: |
+          if [ "${{ runner.os }}" = "Linux" ]; then
+            sudo apt-get update && sudo apt-get install -y p7zip-full
+          elif [ "${{ runner.os }}" = "macOS" ]; then
+            brew install p7zip
+          fi
+
+      - name: Install build tools (Linux/macOS)
+        if: runner.os != 'Windows' && matrix.os != 'ubuntu-latest'
+        run: |
+          if [ "${{ runner.os }}" = "Linux" ]; then
+            sudo apt-get update && sudo apt-get install -y make gcc
+          elif [ "${{ runner.os }}" = "macOS" ]; then
+            brew install make
+          fi
+
+      # 计算版本号（去点）
+      - name: Compute version string
+        id: version
+        shell: bash
+        run: |
+          VERSION_NO_DOT="${{ github.event.inputs.version }}"
+          VERSION_NO_DOT="${VERSION_NO_DOT//./}"
+          echo "ver_no_dot=$VERSION_NO_DOT" >> $GITHUB_OUTPUT
+
+      # 下载源码（Linux 用 .tar.xz，其他用 .7z）
+      - name: Download source (Linux)
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          URL="https://www.7-zip.org/a/7z${{ steps.version.outputs.ver_no_dot }}-src.tar.xz"
+          echo "Downloading $URL"
+          curl -L -o source.tar.xz "$URL"
+
+      - name: Download source (Windows/macOS)
+        if: runner.os != 'Linux'
+        shell: bash
+        run: |
+          URL="https://www.7-zip.org/a/7z${{ steps.version.outputs.ver_no_dot }}-src.7z"
+          echo "Downloading $URL"
+          curl -L -o source.7z "$URL"
+
+      # 解压源码
+      - name: Extract source (Linux)
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          mkdir src
+          tar -xJf source.tar.xz -C src
+
+      - name: Extract source (Windows/macOS)
+        if: runner.os != 'Linux'
+        shell: bash
+        run: |
+          mkdir src
+          7z x source.7z -osrc
+
+      # 定位 CPP/7zip 目录
+      - name: Find CPP/7zip directory
+        id: src_dir
+        shell: bash
+        run: |
+          SRC_PATH=$(find src -type d -name "7zip" | grep "/CPP/7zip" | head -1)
+          if [ -z "$SRC_PATH" ]; then
+            echo "未找到 CPP/7zip 目录"
+            exit 1
+          fi
+          echo "源码目录: $SRC_PATH"
+          echo "src_dir=$SRC_PATH" >> $GITHUB_OUTPUT
+
+      # 编译 (Linux)
+      - name: Build (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          cd ${{ steps.src_dir.outputs.src_dir }}
+          make CXXFLAGS="-static-libstdc++ -static-libgcc" LDFLAGS="-static-libstdc++ -static-libgcc"
+
+      # 编译 (macOS)
+      - name: Build (macOS)
+        if: runner.os == 'macOS'
+        run: |
+          cd ${{ steps.src_dir.outputs.src_dir }}
+          make
+
+      # 编译 (Windows)
+      - name: Setup VS environment (Windows)
+        if: runner.os == 'Windows'
+        uses: ilammy/msvc-dev-cmd@v1
+        with:
+          arch: x64
+
+      - name: Build (Windows)
+        if: runner.os == 'Windows'
+        shell: cmd
+        run: |
+          cd ${{ steps.src_dir.outputs.src_dir }}
+          nmake /A
+
+      # 收集产物 (Linux/macOS)
+      - name: Collect artifacts (Linux/macOS)
+        if: runner.os != 'Windows'
+        run: |
+          mkdir artifacts
+          find ${{ steps.src_dir.outputs.src_dir }} -type f -executable -exec cp {} artifacts/ \; 2>/dev/null || true
+          for exe in 7z 7za 7z.so; do
+            find ${{ steps.src_dir.outputs.src_dir }} -name "$exe" -exec cp {} artifacts/ \; 2>/dev/null || true
+          done
+
+      # 收集产物 (Windows) - 复制所有 DLL 和 EXE
+      - name: Collect artifacts (Windows)
+        if: runner.os == 'Windows'
+        shell: cmd
+        run: |
+          mkdir artifacts
+          cd ${{ steps.src_dir.outputs.src_dir }}
+          copy *.dll ..\..\artifacts\
+          copy *.exe ..\..\artifacts\
+
+      # 上传产物
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: 7zip-${{ github.event.inputs.version }}-${{ runner.os }}
+          path: artifacts/
+
+
