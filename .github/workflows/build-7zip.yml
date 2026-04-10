@@ -40,8 +40,8 @@ jobs:
         run: |
           tar -xf 7z-src.tar.xz
           $srcDir = "7z$env:VERSION-src"
-          # 构建纯 Windows 格式的工作目录路径 (使用反斜杠)
-          $workDir = Join-Path $srcDir "CPP\7zip"
+          # 使用相对路径 + 正斜杠，Git Bash 完全支持
+          $workDir = "$srcDir/CPP/7zip"
           echo "SRC_DIR=$srcDir" >> $env:GITHUB_ENV
           echo "WORK_DIR=$workDir" >> $env:GITHUB_ENV
           Write-Host "Source directory: $srcDir"
