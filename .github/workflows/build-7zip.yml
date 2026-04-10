@@ -3,8 +3,8 @@ name: Build 7-Zip Core Libraries (Cross-Platform)
 on:
   push:
     tags:
-      - 'Windows-*'   # 触发Windows构建
-      - 'Linux-*'     # 触发Linux构建
+      - 'Windows-*'   # 触发 Windows 构建
+      - 'Linux-*'     # 触发 Linux 构建
   workflow_dispatch:  # 允许手动触发
 
 defaults:
@@ -22,9 +22,7 @@ jobs:
         arch: [x86, x64, arm64]
     steps:
       - name: 📥 1. 提取版本号
-        id: extract_version
         run: |
-          # 从Windows-2600格式的标签中提取2600作为版本号
           TAG_NAME=${GITHUB_REF#refs/tags/}
           VERSION=${TAG_NAME#Windows-}
           echo "VERSION=$VERSION" >> $GITHUB_ENV
@@ -41,10 +39,13 @@ jobs:
         shell: pwsh
         run: |
           tar -xf 7z-src.tar.xz
-          # 解压后的目录名为 '7z<VERSION>-src'，例如 '7z2600-src'
           $srcDir = "7z$env:VERSION-src"
+          # 构建纯 Windows 格式的工作目录路径 (使用反斜杠)
+          $workDir = Join-Path $srcDir "CPP\7zip"
           echo "SRC_DIR=$srcDir" >> $env:GITHUB_ENV
+          echo "WORK_DIR=$workDir" >> $env:GITHUB_ENV
           Write-Host "Source directory: $srcDir"
+          Write-Host "Working directory: $workDir"
 
       - name: ⚙️ 4. 配置MSVC编译环境
         uses: ilammy/msvc-dev-cmd@v1
@@ -52,7 +53,8 @@ jobs:
           arch: ${{ matrix.arch }}
 
       - name: 🛠️ 5. 执行NMAKE构建 (汇编优化)
-        working-directory: ${{ env.SRC_DIR }}/CPP/7zip
+        working-directory: ${{ env.WORK_DIR }}
+        shell: bash
         run: |
           # /A 参数强制重新构建所有目标，确保汇编优化完全生效
           nmake /A
@@ -83,9 +85,9 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        platform: 
-          - { name: manylinux_2_28, image: quay.io/pypa/manylinux_2_28_x86_64, tag_suffix: '' }
-          - { name: manylinux2014, image: quay.io/pypa/manylinux2014_x86_64, tag_suffix: '' }
+        platform:
+          - { name: manylinux_2_28, image: quay.io/pypa/manylinux_2_28_x86_64 }
+          - { name: manylinux2014, image: quay.io/pypa/manylinux2014_x86_64 }
     container:
       image: ${{ matrix.platform.image }}
       options: --user root
